@@ -70,6 +70,14 @@ export const respondToInvite = async (inviteId: string, state: string) => {
   return response.data;
 };
 
+// Chỉnh sửa thông tin note
+export const editNote = async (groupId: string, content: string, lastModifiedBy: string, noteId: string) => {
+  const response = await axios.post(`${API_BASE_URL}/note/edit`, { groupId, content, lastModifiedBy, noteId }, {
+    withCredentials: true
+  });
+  return response.data;
+};
+
 // Lấy email của user
 export const getCurrentUserEmail = (): string | null => {
   const token = getTokenFromCookies();

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Typography, Collapse, List, Button, Tag, Modal, Input, Spin } from 'antd';
-import { getGroupById, getAllGroupNotes, getCurrentUserId, getCurrentUserEmail, getAllGroups } from '../../api/auth';
+import { Typography, Collapse, List, Button, Tag, Modal, Input } from 'antd';
+import { getGroupById, getAllGroupNotes, getCurrentUserId, getCurrentUserEmail, getAllGroups, editNote } from '../../api/auth';
 import 'antd/dist/reset.css';
 
 const { Title } = Typography;
+const { confirm } = Modal;
 
 interface Member { 
   _id: string; 
@@ -35,12 +36,10 @@ const Groups: React.FC = () => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [editQueue, setEditQueue] = useState<Queue[]>([]);
-  const [viewingNote, setViewingNote] = useState<Note | null>(null);
-  const [editingNote, setEditingNote] = useState<Note | null>(null);
-  const [historyNote, setHistoryNote] = useState<Note | null>(null);
+  const [currentNote, setCurrentNote] = useState<{ note: Note | null; isEditing: boolean }>({ note: null, isEditing: false });
   const [editContent, setEditContent] = useState<string>('');
   const [activeKey, setActiveKey] = useState<string | string[]>('');
-  const [loading, setLoading] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
   const [editRequest, setEditRequest] = useState<Queue | null>(null);
   
   useEffect(() => {
@@ -89,12 +88,12 @@ const Groups: React.FC = () => {
       setTimeout(() => { 
         if (editQueue[0]?.noteId === noteId) { 
           // nếu đứng đầu queue -> cho edit, note vào trạng thái locked
-          setEditingNote(notes.find(n => n._id === noteId) || null); 
+          setCurrentNote({ note: notes.find(n => n._id === noteId) || null, isEditing: true });
           setNotes(prevNotes => 
             prevNotes.map(n => n._id === noteId ? { ...n, status: 'locked' } : n)
           ); 
           // ngừng load, bỏ khỏi hàng đợi
-          setLoading(null); 
+          setLoading(false); 
           setEditQueue(prevQueue => prevQueue.slice(1));
         } else { 
           // Nếu không edit được, reset thạng thái về available
@@ -102,7 +101,7 @@ const Groups: React.FC = () => {
             prevNotes.map(n => n._id === noteId ? { ...n, status: 'available' } : n) 
           ); 
           // ngừng load, bỏ khỏi hàng đợi
-          setLoading(null); 
+          setLoading(false); 
           setEditQueue(prevQueue => prevQueue.filter(queueItem => queueItem.noteId !== noteId));
         } 
       }, 1000); 
@@ -110,65 +109,92 @@ const Groups: React.FC = () => {
   }, [editQueue, notes]);
 
   const viewNote = (note: Note) => {
-    setViewingNote(note);
+    setCurrentNote({ note, isEditing: false });
+    setEditContent(note.content);
   };
 
-  const handleEditClick = (note: Note) => {
+  const handleEditClick = (note: Note | null) => { 
+    if (!note) return;
+
     const userEmail = getCurrentUserEmail();
     if (userEmail) { 
       // gửi edit request
       setEditRequest({ noteId: note._id, userEmail });
     }  
     // note vào trạng thái chờ (pending)
-    setLoading(note._id);
+    setLoading(true);
     setNotes(prevNotes => 
       prevNotes.map(n => n._id === note._id ? { ...n, status: 'pending' } : n) 
     );
   };  
 
-  const saveNote = () => {
-    if (editingNote) {
+  const saveNote = async () => {
+    if (currentNote.note) {
+      // const { group_id, _id } = currentNote.note; 
+      const content = editContent;
       const currentUserId = getCurrentUserId();
-      // Lưu id user edit cuối, chuyển trạng thái available
-      setNotes((prevNotes) =>
-        prevNotes.map((note) =>
-          note._id === editingNote._id
-            ? { 
-                ...note, 
-                content: editContent, 
-                last_modified_by: currentUserId ? currentUserId : 'unknown',
-                status: 'available'
-              }
-            : note
-        )
-      );
-      setEditingNote(null);
-      setEditContent('');
-      // Bỏ khỏi hàng đợi
-      setEditQueue(prevQueue => prevQueue.filter(queueItem => queueItem.noteId !== editingNote._id));
+      try {
+        // API post thông tin note
+        // await editNote(group_id, content, currentUserId || 'unknown', _id);
+
+        // Lưu id user edit cuối, chuyển trạng thái available
+        setNotes((prevNotes) =>
+          prevNotes.map((note) =>
+            note._id === currentNote.note!._id
+              ? { 
+                  ...note, 
+                  content, 
+                  last_modified_by: currentUserId ? currentUserId : 'unknown',
+                  status: 'available'
+                }
+              : note
+          )
+        );
+        setCurrentNote({ note: null, isEditing: false });
+        setEditContent('');
+      } catch (error) { 
+        console.error('Error saving note:', error); 
+      }
     }
   };  
 
-  const cancelEdit = () => {
-    if (editingNote) {
+  const showUnsavedChangesConfirm = () => {
+    confirm({
+      title: 'Unsaved Changes',
+      content: 'Dữ liệu chưa được lưu. Bạn có chắc chắn muốn đóng mà không lưu không?',
+      onOk() {
+        // Hủy edit, chuyển trạng thái available 
+        setNotes((prevNotes) =>
+          prevNotes.map((note) =>
+            note._id === currentNote.note!._id
+              ? { ...note, status: 'available' }
+              : note
+          )
+        );
+        setCurrentNote({ note: null, isEditing: false });
+        setEditContent('');
+      }
+    });
+  };
+  
+  const handleCancel = () => {
+    if (currentNote.isEditing) {
+      showUnsavedChangesConfirm();
+    } else {
       // Hủy edit, chuyển trạng thái available 
       setNotes((prevNotes) =>
         prevNotes.map((note) =>
-          note._id === editingNote._id
+          note._id === currentNote.note!._id
             ? { ...note, status: 'available' }
             : note
         )
       );
-      setEditingNote(null);
+      setCurrentNote({ note: null, isEditing: false });
       setEditContent('');
       // Bỏ khỏi hàng đợi
-      setEditQueue(prevQueue => prevQueue.filter(queueItem => queueItem.noteId !== editingNote._id));
+      setEditQueue(prevQueue => prevQueue.filter(queueItem => queueItem.noteId !== currentNote.note!._id));
     }
-  };     
-
-  const viewHistory = (note: Note) => {
-    setHistoryNote(note);
-  };
+  };  
 
   const getStatusTag = (note: Note) => {
     if (note.status === 'locked') {
@@ -191,15 +217,7 @@ const Groups: React.FC = () => {
             <List.Item
               key={note._id}
               actions={[
-                <Button onClick={() => viewNote(note)}>View</Button>,
-                <Button
-                  onClick={() => handleEditClick(note)}
-                  loading={loading === note._id}
-                  disabled={loading === note._id || note.status === 'locked'}
-                >
-                  {loading === note._id ? <Spin /> : 'Edit'}
-                </Button>,
-                <Button onClick={() => viewHistory(note)}>History</Button>
+                <Button onClick={() => viewNote(note)}>View</Button>
               ]}
             >
               <List.Item.Meta
@@ -239,36 +257,38 @@ const Groups: React.FC = () => {
         />
 
         <Modal
-          title={`View Note ID: ${viewingNote?._id}`}
-          open={!!viewingNote}
-          onCancel={() => setViewingNote(null)}
-          footer={<Button onClick={() => setViewingNote(null)}>Close</Button>}
-        >
-          <p>{viewingNote?.content}</p>
-        </Modal>
-
-        <Modal
-          title={`Edit Note ID: ${editingNote?._id}`}
-          open={!!editingNote}
-          onCancel={cancelEdit}
+          title={`View Note ID: ${currentNote.note?._id}`}
+          open={!!currentNote.note}
+          onCancel={handleCancel}
           footer={[
-            <Button key="cancel" onClick={cancelEdit}>Cancel</Button>,
-            <Button key="save" type="primary" onClick={saveNote}>Save</Button>
+            <Button 
+              key="save" 
+              type="primary" 
+              onClick={saveNote} 
+              disabled={!currentNote.isEditing} 
+            > 
+              Save 
+            </Button>,
+            <Button 
+              key="edit" 
+              type="primary" 
+              onClick={() => handleEditClick(currentNote.note)} 
+              loading={loading} 
+              disabled={currentNote.isEditing} 
+            >
+              Edit 
+            </Button>,
+            <Button key="cancel" onClick={handleCancel}>Cancel</Button>
           ]}
+          maskClosable={false}
         >
-          <Input.TextArea
+          <Input.TextArea 
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
+            disabled={!currentNote.isEditing}
+            style={{ backgroundColor: '#fff', color: 'black' }} 
           />
-        </Modal>
-
-        <Modal
-          title={`History of Note ID: ${historyNote?._id}`}
-          open={!!historyNote}
-          onCancel={() => setHistoryNote(null)}
-          footer={<Button onClick={() => setHistoryNote(null)}>Close</Button>}
-        >
-          <p>Last modified by user with ID {historyNote?.last_modified_by}</p>
+          <p>Last modified by user with ID {currentNote.note?.last_modified_by}</p>
         </Modal>
       </div>
     </div>
