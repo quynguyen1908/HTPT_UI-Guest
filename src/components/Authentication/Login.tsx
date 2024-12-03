@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Input, Button, Form } from 'antd';
-import { login } from '../../api/auth';
+import { login, getUserIdEmail } from '../../api/auth';
 import 'antd/dist/reset.css';
 
 const Login: React.FC = () => {
@@ -12,7 +12,9 @@ const Login: React.FC = () => {
   const handleSubmit = async () => {
     try {
       await login(email, password);
-      alert('Login successful!');
+      const info = await getUserIdEmail(email);
+      localStorage.setItem('id', info._id);
+      localStorage.setItem('email', info.email);
       navigate('/dashboard');
     } catch (error) {
       alert('Invalid credentials');

@@ -1,7 +1,9 @@
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
-const API_BASE_URL = 'http://localhost:3000/api'; // URL
+// const API_BASE_URL = 'https://26.216.17.44:3000/api';
+
+const API_BASE_URL = 'http://localhost:3000/api';
 
 interface DecodedToken {
   id: string;
@@ -17,6 +19,8 @@ const getTokenFromCookies = (): string | null => {
   return null;
 };
 
+
+// Authentication
 // Đăng ký
 export const signup = async (email: string, password: string) => {
   const response = await axios.post(`${API_BASE_URL}/signup`, { email, password });
@@ -31,13 +35,16 @@ export const login = async (email: string, password: string) => {
 
 // Đăng xuất
 export const logout = async () => {
+  // confirm
   const response = await axios.post(`${API_BASE_URL}/logout`, {}, { withCredentials: true });
   return response.data;
 };
 
+
+// Group
 // Lấy toàn bộ group hiện có
 export const getAllGroups = async () => { 
-  const response = await axios.get(`${API_BASE_URL}/group/getAllGroup`, { withCredentials: true }); 
+  const response = await axios.get(`${API_BASE_URL}/group`, { withCredentials: true }); 
   return response.data; 
 };
 
@@ -48,16 +55,18 @@ export const getGroupById = async (groupId: string) => {
   });
   return response.data;
 };
-
-// Lấy toàn bộ note từ 1 group
-export const getAllGroupNotes = async (groupId: string) => {
-  const response = await axios.get(`${API_BASE_URL}/note/getAllGroupNote`, {
-    params: { group_id: groupId },
-    withCredentials: true
-  });
+// Thêm group mới
+export const addGroup = async (groupName: string, members: { _id: string, email: string, role: string }[]) => {
+  const response = await axios.post(`${API_BASE_URL}/group`, {
+    group_name: groupName,
+    members
+  }, { withCredentials: true });
   return response.data;
 };
 
+
+
+// Invite
 // Lấy toàn bộ lời mời
 export const getAllInvited = async () => {
   const response = await axios.get(`${API_BASE_URL}/allInvited`, { withCredentials: true });
@@ -69,6 +78,25 @@ export const respondToInvite = async (inviteId: string, state: string) => {
   const response = await axios.post(`${API_BASE_URL}/group/response`, { inviteId, state }, { withCredentials: true });
   return response.data;
 };
+// Gửi lời mời user
+export const inviteUser = async (groupId: string, invitingUser: string, invitedUser: string) => {
+  const response = await axios.post(`${API_BASE_URL}/group/invite`, {
+    group_id: groupId,
+    inviting_user_id: invitingUser,
+    invited_user_id: invitedUser
+  }, { withCredentials: true });
+  return response.data;
+};
+
+
+// Note
+// Lấy toàn bộ note từ 1 group
+export const getAllGroupNotes = async (group_id: string) => {
+  const response = await axios.post(`${API_BASE_URL}/note/getAllGroupNote`, 
+    { group_id},{ withCredentials: true }
+  );
+  return response.data;
+};
 
 // Chỉnh sửa thông tin note
 export const editNote = async (groupId: string, content: string, lastModifiedBy: string, noteId: string) => {
@@ -78,22 +106,41 @@ export const editNote = async (groupId: string, content: string, lastModifiedBy:
   return response.data;
 };
 
+// Thêm note
+export const addNote = async (groupId: string, content: string, lastModifiedBy: string) => {
+  const response = await axios.post(`${API_BASE_URL}/note`, {
+    group_id: groupId,
+    content,
+    last_modified_by: lastModifiedBy
+  }, { withCredentials: true });
+  return response.data;
+};
+// Xóa note
+export const deleteNote = async (noteId: string) => {
+  const response = await axios.post(`${API_BASE_URL}/note/delete`, {
+    note_id: noteId
+  }, { withCredentials: true });
+  return response.data;
+};
+
+
+// User
+// getUserIdByEmail
+export const getUserIdEmail = async (email: string) => {
+  const response = await axios.post(`${API_BASE_URL}/findUser`, { email }, {
+    withCredentials: true
+  });
+  return response.data;
+};
+
 // Lấy email của user
 export const getCurrentUserEmail = (): string | null => {
-  const token = getTokenFromCookies();
-  if (token) {
-    const decodedToken = jwtDecode<DecodedToken>(token);
-    return decodedToken.email;
-  }
-  return null;
+  const email = localStorage.getItem('email');
+  return email;
 };
 
 // Lấy id của user
 export const getCurrentUserId = (): string | null => {
-  const token = getTokenFromCookies();
-  if (token) {
-    const decodedToken = jwtDecode<DecodedToken>(token);
-    return decodedToken.id;
-  }
-  return null;
+  const id = localStorage.getItem('id');
+  return id;
 };

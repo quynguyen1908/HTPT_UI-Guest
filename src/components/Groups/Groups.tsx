@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Typography, Collapse, List, Button, Tag, Modal, Input } from 'antd';
-import { getGroupById, getAllGroupNotes, getCurrentUserId, getCurrentUserEmail, getAllGroups, editNote } from '../../api/auth';
+import { getGroupById, getAllGroupNotes, getCurrentUserId, getCurrentUserEmail, getAllGroups, getUserIdEmail, editNote, addNote, deleteNote, inviteUser, addGroup } from '../../api/auth';
 import 'antd/dist/reset.css';
+import io from "socket.io-client";
+import { all } from 'axios';
+import { message } from 'antd';
 
 const { Title } = Typography;
 const { confirm } = Modal;
@@ -23,13 +26,11 @@ interface Note {
   group_id: string;
   content: string;
   last_modified_by: string;
-  // Trạng thái của note
-  status: 'available' | 'pending' | 'locked';
 }
 // Hàng đợi
 interface Queue {
-  noteId: string;
   userEmail: string;
+
 }
 
 const Groups: React.FC = () => {
@@ -41,36 +42,36 @@ const Groups: React.FC = () => {
   const [activeKey, setActiveKey] = useState<string | string[]>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [editRequest, setEditRequest] = useState<Queue | null>(null);
-  
+  const [addNoteVisible, setAddNoteVisible] = useState<boolean>(false);
+  const [newNoteContent, setNewNoteContent] = useState<string>('');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
+  const [addGroupVisible, setAddGroupVisible] = useState<boolean>(false);
+  const [newGroupName, setNewGroupName] = useState<string>('');
+  const [inviteVisible, setInviteVisible] = useState<boolean>(false);
+  const [inviteEmail, setInviteEmail] = useState<string>('');
+  const [selectedInviteGroupId, setSelectedInviteGroupId] = useState<string>('');
+
+
   useEffect(() => {
     // fetch group, note
     const fetchUserGroupsAndNotes = async () => {
-      try {  
-        const userId = getCurrentUserId();
+      try { 
         const allGroups = await getAllGroups(); 
         const userGroups: Group[] = []; 
-        const allNotes: Note[] = [];
+        let allNotes: Note[] = [];
 
         for (const group of allGroups) {
-          if (group.members.some((member: Member) => member._id === userId)) {
             const groupData = await getGroupById(group._id); 
-            userGroups.push(groupData[0]); 
-            const notesData = await getAllGroupNotes(group._id); 
-            // Thêm status, mặc định available
-            const notesWithStatus = notesData.map((note: Note) => ({ 
-              ...note, 
-              status: note.status || 'available' 
-            }));
-            allNotes.push(...notesWithStatus); 
-          } 
-        }
-        setGroups(userGroups); 
+            groupData[0].role = group.role;
+            userGroups.push(groupData[0]);
+            allNotes = await getAllGroupNotes(group._id); 
+          }
         setNotes(allNotes);
+        setGroups(userGroups);
       } catch (error) { 
         console.error('Error fetching group or notes:', error); 
       } 
     }; 
-
     fetchUserGroupsAndNotes(); 
   }, []);   
 
@@ -83,28 +84,7 @@ const Groups: React.FC = () => {
 
   useEffect(() => { 
     if (editQueue.length > 0) { 
-      const { noteId } = editQueue[0]; 
-      // chờ 1 giây
-      setTimeout(() => { 
-        if (editQueue[0]?.noteId === noteId) { 
-          // nếu đứng đầu queue -> cho edit, note vào trạng thái locked
-          setCurrentNote({ note: notes.find(n => n._id === noteId) || null, isEditing: true });
-          setNotes(prevNotes => 
-            prevNotes.map(n => n._id === noteId ? { ...n, status: 'locked' } : n)
-          ); 
-          // ngừng load, bỏ khỏi hàng đợi
-          setLoading(false); 
-          setEditQueue(prevQueue => prevQueue.slice(1));
-        } else { 
-          // Nếu không edit được, reset thạng thái về available
-          setNotes(prevNotes => 
-            prevNotes.map(n => n._id === noteId ? { ...n, status: 'available' } : n) 
-          ); 
-          // ngừng load, bỏ khỏi hàng đợi
-          setLoading(false); 
-          setEditQueue(prevQueue => prevQueue.filter(queueItem => queueItem.noteId !== noteId));
-        } 
-      }, 1000); 
+      console.log(editQueue.length)
     } 
   }, [editQueue, notes]);
 
@@ -115,17 +95,14 @@ const Groups: React.FC = () => {
 
   const handleEditClick = (note: Note | null) => { 
     if (!note) return;
-
+    // const socket= io("https://26.216.17.44:3000", {withCredentials:true});
     const userEmail = getCurrentUserEmail();
     if (userEmail) { 
       // gửi edit request
-      setEditRequest({ noteId: note._id, userEmail });
+      setEditRequest({ userEmail });
     }  
     // note vào trạng thái chờ (pending)
     setLoading(true);
-    setNotes(prevNotes => 
-      prevNotes.map(n => n._id === note._id ? { ...n, status: 'pending' } : n) 
-    );
   };  
 
   const saveNote = async () => {
@@ -137,19 +114,6 @@ const Groups: React.FC = () => {
         // API post thông tin note
         // await editNote(group_id, content, currentUserId || 'unknown', _id);
 
-        // Lưu id user edit cuối, chuyển trạng thái available
-        setNotes((prevNotes) =>
-          prevNotes.map((note) =>
-            note._id === currentNote.note!._id
-              ? { 
-                  ...note, 
-                  content, 
-                  last_modified_by: currentUserId ? currentUserId : 'unknown',
-                  status: 'available'
-                }
-              : note
-          )
-        );
         setCurrentNote({ note: null, isEditing: false });
         setEditContent('');
       } catch (error) { 
@@ -163,14 +127,6 @@ const Groups: React.FC = () => {
       title: 'Unsaved Changes',
       content: 'Dữ liệu chưa được lưu. Bạn có chắc chắn muốn đóng mà không lưu không?',
       onOk() {
-        // Hủy edit, chuyển trạng thái available 
-        setNotes((prevNotes) =>
-          prevNotes.map((note) =>
-            note._id === currentNote.note!._id
-              ? { ...note, status: 'available' }
-              : note
-          )
-        );
         setCurrentNote({ note: null, isEditing: false });
         setEditContent('');
       }
@@ -181,35 +137,138 @@ const Groups: React.FC = () => {
     if (currentNote.isEditing) {
       showUnsavedChangesConfirm();
     } else {
-      // Hủy edit, chuyển trạng thái available 
-      setNotes((prevNotes) =>
-        prevNotes.map((note) =>
-          note._id === currentNote.note!._id
-            ? { ...note, status: 'available' }
-            : note
-        )
-      );
       setCurrentNote({ note: null, isEditing: false });
       setEditContent('');
       // Bỏ khỏi hàng đợi
-      setEditQueue(prevQueue => prevQueue.filter(queueItem => queueItem.noteId !== currentNote.note!._id));
+      // setEditQueue(prevQueue => prevQueue.filter(queueItem => queueItem.noteId !== currentNote.note!._id));
     }
   };  
 
-  const getStatusTag = (note: Note) => {
-    if (note.status === 'locked') {
-      return <Tag color="red">Locked</Tag>;
-    } else if (note.status === 'pending') {
-      return <Tag color="orange">Pending</Tag>;
+  const handleAddNoteClick = (groupId: string) => {
+    setSelectedGroupId(groupId);
+    setAddNoteVisible(true);
+  };
+
+  const handleAddNote = async () => {
+    const content = newNoteContent.trim();
+    const last_modified_by = getCurrentUserId();
+    const group_id = selectedGroupId;
+  
+    if (!content) {
+      message.error('Note content cannot be empty!');
+      return;
     }
-    return <Tag color="green">Available</Tag>;
+  
+    try {
+      const newNote = await addNote(group_id, content, last_modified_by || 'unknown');
+  
+      // Add the new note to state
+      setNotes((prevNotes) => [...prevNotes, newNote]);
+  
+      setNewNoteContent('');
+      setAddNoteVisible(false);
+      message.success('Note added successfully!');
+    } catch (error) {
+      console.error('Error adding note:', error);
+      message.error('Failed to add note');
+    }
+  };
+  
+  const handleDeleteNote = async (noteId: string) => {
+    Modal.confirm({
+      title: 'Confirm Deletion',
+      content: 'Are you sure you want to delete this note? This action cannot be undone.',
+      okText: 'Yes, delete it',
+      okType: 'danger',
+      cancelText: 'No, keep it',
+      onOk: async () => {
+        try {
+          const response = await deleteNote(noteId);
+  
+          // Remove the note from state
+          setNotes(prevNotes => prevNotes.filter(note => note._id !== noteId));
+          
+          setCurrentNote({ note: null, isEditing: false });
+          setEditContent('');
+  
+          // Show success message
+          message.success('Note deleted successfully!');
+        } catch (error) {
+          console.error('Error deleting note:', error);
+          message.error('Failed to delete note');
+        }
+      }
+    });
   };  
+
+  const handleAddGroup = async () => {
+    const groupName = newGroupName.trim(); // Trim to remove any leading/trailing spaces
+    const currentUserId = getCurrentUserId();
+    const currentUserEmail = getCurrentUserEmail();
+  
+    if (!groupName) {
+      message.error('Group name cannot be empty!');
+      return;
+    }
+  
+    try {
+      const newGroup = await addGroup(groupName, [{ _id: currentUserId, email: currentUserEmail, role: 'admin' }]);
+  
+      // Add the new group to state
+      setGroups((prevGroups) => [...prevGroups, newGroup]);
+  
+      setNewGroupName('');
+      setAddGroupVisible(false);
+      message.success('Group added successfully!');
+    } catch (error) {
+      console.error('Error adding group:', error);
+      message.error('Failed to add group');
+    }
+  };  
+
+  const handleInviteClick = (groupId: string) => {
+    setSelectedInviteGroupId(groupId);
+    setInviteVisible(true);
+  };
+
+  const handleInviteUser = async () => {
+    const email = inviteEmail.trim();
+    const group_id = selectedInviteGroupId;
+  
+    if (!email) {
+      message.error('Email cannot be empty!');
+      return;
+    }
+  
+    try {
+      const invited_user = await getUserIdEmail(email);
+      const inviting_user_id = getCurrentUserId();
+      if (invited_user && inviting_user_id) {
+        const response = await inviteUser(group_id, inviting_user_id, invited_user._id);
+    
+        setInviteEmail('');
+        setInviteVisible(false);
+        message.success('User invited successfully!');
+      }
+    } catch (error) {
+      console.error('Error inviting user:', error);
+      message.error('Failed to invite user');
+    }
+  };
+  
 
   const collapseItems = groups.map(group => ({
     key: group._id,
     label: group.group_name,
     children: (
       <div>
+        <Button 
+              key="invite" 
+              type="default" 
+              onClick={() => handleInviteClick(group._id)}
+            > 
+              Invite 
+            </Button>
         <Title level={5} className="mt-4">Notes</Title>
         <List
           dataSource={notes.filter(note => note.group_id === group._id)}
@@ -222,25 +281,17 @@ const Groups: React.FC = () => {
             >
               <List.Item.Meta
                 title={`Note ID: ${note._id}`}
-                description={getStatusTag(note)}
               />
             </List.Item>
           )}
         />
-        <div> 
-          <Title level={5}>Queue</Title> 
-          <List 
-            dataSource={editQueue} 
-            renderItem={(queueItem, index) => ( 
-              <List.Item key={queueItem.noteId + index}> 
-                <List.Item.Meta 
-                  title={`Note ID: ${queueItem.noteId}, Email: ${queueItem.userEmail}`} 
-                  description={`Position in queue: ${index + 1}`} 
-                /> 
-              </List.Item> 
-            )} 
-          /> 
-        </div>
+        <Button 
+              key="add" 
+              type="default" 
+              onClick={() => handleAddNoteClick(group._id)}
+            > 
+              Add Note 
+            </Button>
       </div>
     )
   }));
@@ -265,7 +316,7 @@ const Groups: React.FC = () => {
               key="save" 
               type="primary" 
               onClick={saveNote} 
-              disabled={!currentNote.isEditing} 
+              hidden={!currentNote.isEditing}
             > 
               Save 
             </Button>,
@@ -288,9 +339,82 @@ const Groups: React.FC = () => {
             disabled={!currentNote.isEditing}
             style={{ backgroundColor: '#fff', color: 'black' }} 
           />
-          <p>Last modified by user with ID {currentNote.note?.last_modified_by}</p>
+          {/* <p>Last modified by {currentNote.note?.user_details.email}</p> */}
+          
+          <p>Last modified by {currentNote.note?.last_modified_by}</p>
+          {/*  */}
+          <div> 
+            <Button 
+              key="delete" 
+              type="primary" 
+              danger
+              onClick={() => handleDeleteNote(currentNote.note!._id)}
+            >
+              Delete Note
+            </Button>
+          {/* <Title level={5}>Queue</Title> 
+          <List 
+            dataSource={editQueue} 
+            renderItem={(queueItem, index) => ( 
+              <List.Item key={queueItem.noteId + index}> 
+                <List.Item.Meta 
+                  title={`Note ID: ${queueItem.noteId}, Email: ${queueItem.userEmail}`} 
+                  description={`Position in queue: ${index + 1}`} 
+                /> 
+              </List.Item> 
+            )} 
+          />  */}
+        </div>
         </Modal>
-      </div>
+        <Modal
+          title="Add Note"
+          open={addNoteVisible}
+          onCancel={() => setAddNoteVisible(false)}
+          onOk={handleAddNote}
+          maskClosable={false}
+        >
+          <Input.TextArea 
+            value={newNoteContent} 
+            onChange={(e) => setNewNoteContent(e.target.value)} 
+            placeholder="Enter note content"
+          />
+        </Modal>
+        <br/>
+        <Button 
+          key="add-group" 
+          type="default" 
+          onClick={() => setAddGroupVisible(true)}
+        > 
+          Add Group 
+        </Button>
+        <Modal
+          title="Add Group"
+          open={addGroupVisible}
+          onCancel={() => setAddGroupVisible(false)}
+          onOk={handleAddGroup}
+          maskClosable={false}
+        >
+          <Input 
+            value={newGroupName} 
+            onChange={(e) => setNewGroupName(e.target.value)} 
+            placeholder="Enter group name"
+          />
+        </Modal>
+        <Modal
+          title="Invite User"
+          open={inviteVisible}
+          onCancel={() => setInviteVisible(false)}
+          onOk={handleInviteUser}
+          maskClosable={false}
+        >
+          <Input 
+            value={inviteEmail} 
+            onChange={(e) => setInviteEmail(e.target.value)} 
+            placeholder="Enter user email"
+          />
+        </Modal>
+
+    </div>
     </div>
   );
 };

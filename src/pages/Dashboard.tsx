@@ -54,7 +54,6 @@ const Dashboard: React.FC = () => {
   const handleLogout = async () => {
     try {
       await logout();
-      alert('Logout successful!');
       navigate('/login');
     } catch (error) {
       console.error('Logout failed:', error);
@@ -70,6 +69,15 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const handleDecline = async (inviteId: string) => {
+    try {
+      await respondToInvite(inviteId, 'decline');
+      alert('Respond success!');
+    } catch (error) {
+      console.error('Error accepting invitation:', error);
+    }
+  };
+
   return (
     <div className="bg-gray-100 h-screen grid grid-cols-1 md:grid-cols-[1fr_2fr_1fr] p-10 gap-5">
       {/* Logout */}
@@ -78,7 +86,7 @@ const Dashboard: React.FC = () => {
           <Title level={2}>Welcome!</Title>
           <p className="text-xl">{email}</p>
         </div>
-        <Button type="primary" onClick={handleLogout} className="w-min my-4">
+        <Button type="default" onClick={handleLogout} className="w-min my-4">
           Logout
         </Button>
       </div>
@@ -98,8 +106,11 @@ const Dashboard: React.FC = () => {
                 <p>Invited to: {invitation.group_details.group_name}</p>
                 <p>Invited by: {invitation.user_invite.email}</p>
                 <p>Invite at: {new Date(invitation.invite_time).toLocaleString()}</p> 
-                <Button type="primary" onClick={() => handleAccept(invitation._id)} disabled={invitation.state === 'accepted'}>
+                <Button type="primary" onClick={() => handleAccept(invitation._id)} disabled={invitation.state !== 'none'}>
                   Accept
+                </Button>
+                <Button type="default" onClick={() => handleDecline(invitation._id)} disabled={invitation.state !== 'none'}>
+                  Decline
                 </Button>
               </Card>
             </List.Item> 
